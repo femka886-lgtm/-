@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,276 +26,782 @@ class LifeGamificationApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF5B8CFF),
+          seedColor: const Color(0xFF4F46E5),
           brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: const Color(0xFFF4F7FB),
+        scaffoldBackgroundColor: const Color(0xFFF5F7FA),
         snackBarTheme: const SnackBarThemeData(
           behavior: SnackBarBehavior.floating,
         ),
+        dividerColor: const Color(0xFFE6EAF0),
       ),
       home: const MainNavigationScreen(),
     );
   }
 }
 
-enum HabitIconType { water, sport, book }
+enum HabitIconType {
+  water,
+  sport,
+  book,
+}
+
+enum ProofType {
+  note,
+  timer,
+}
+
+enum HabitStatus {
+  idle,
+  inProgress,
+  rewardReady,
+  completed,
+}
 
 class Habit {
-  final String id;
-  final String title;
-  final int xpReward;
-  final int restMinutesReward;
-  final bool isCompletedToday;
-
   const Habit({
     required this.id,
     required this.title,
     required this.xpReward,
     required this.restMinutesReward,
+    required this.iconType,
+    required this.proofType,
+    this.targetSeconds = 0,
+    this.status = HabitStatus.idle,
     this.isCompletedToday = false,
+    this.proofNote,
+    this.proofSubmittedAt,
   });
 
-  Habit copyWith({bool? isCompletedToday}) {
+  final String id;
+  final String title;
+  final int xpReward;
+  final int restMinutesReward;
+  final HabitIconType iconType;
+  final ProofType proofType;
+  final int targetSeconds;
+  final HabitStatus status;
+  final bool isCompletedToday;
+  final String? proofNote;
+  final DateTime? proofSubmittedAt;
+
+  Habit copyWith({
+    String? id,
+    String? title,
+    int? xpReward,
+    int? restMinutesReward,
+    HabitIconType? iconType,
+    ProofType? proofType,
+    int? targetSeconds,
+    HabitStatus? status,
+    bool? isCompletedToday,
+    String? proofNote,
+    DateTime? proofSubmittedAt,
+    bool clearProofNote = false,
+    bool clearProofSubmittedAt = false,
+  }) {
     return Habit(
-      id: id,
-      title: title,
-      xpReward: xpReward,
-      restMinutesReward: restMinutesReward,
+      id: id ?? this.id,
+      title: title ?? this.title,
+      xpReward: xpReward ?? this.xpReward,
+      restMinutesReward: restMinutesReward ?? this.restMinutesReward,
+      iconType: iconType ?? this.iconType,
+      proofType: proofType ?? this.proofType,
+      targetSeconds: targetSeconds ?? this.targetSeconds,
+      status: status ?? this.status,
       isCompletedToday: isCompletedToday ?? this.isCompletedToday,
+      proofNote: clearProofNote ? null : proofNote ?? this.proofNote,
+      proofSubmittedAt: clearProofSubmittedAt
+          ? null
+          : proofSubmittedAt ?? this.proofSubmittedAt,
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'xpReward': xpReward,
-        'restMinutesReward': restMinutesReward,
-        'isCompletedToday': isCompletedToday,
-      };
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'status': status.name,
+      'isCompletedToday': isCompletedToday,
+      'proofNote': proofNote,
+      'proofSubmittedAt': proofSubmittedAt?.toIso8601String(),
+    };
+  }
 
-  factory Habit.fromJson(Map<String, dynamic> json) => Habit(
-        id: json['id'] as String,
-        title: json['title'] as String,
-        xpReward: json['xpReward'] as int,
-        restMinutesReward: json['restMinutesReward'] as int,
-        isCompletedToday: json['isCompletedToday'] as bool? ?? false,
-      );
+  factory Habit.fromMap(Map<String, dynamic> map) {
+    return Habit(
+      id: map['id'] as String,
+      title: map['title'] as String? ?? '',
+      xpReward: (map['xpReward'] as num?)?.toInt() ?? 0,
+      restMinutesReward: ((map['restMinutesReward'] ?? map['goldReward'] ?? 0)
+              as num?)
+          ?.toInt() ??
+          0,
+      iconType: HabitIconType.values.firstWhere(
+        (value) => value.name == map['iconType'],
+        orElse: () => HabitIconType.book,
+      ),
+      proofType: ProofType.values.firstWhere(
+        (value) => value.name == map['proofType'],
+        orElse: () => ProofType.note,
+      ),
+      targetSeconds: (map['targetSeconds'] as num?)?.toInt() ?? 0,
+      status: HabitStatus.values.firstWhere(
+        (value) => value.name == map['status'],
+        orElse: () => HabitStatus.idle,
+      ),
+      isCompletedToday: map['isCompletedToday'] as bool? ?? false,
+      proofNote: map['proofNote'] as String?,
+      proofSubmittedAt: map['proofSubmittedAt'] == null
+          ? null
+          : DateTime.tryParse(map['proofSubmittedAt'] as String),
+    );
+  }
 }
 
 class ShopItem {
-  final String id;
-  final String title;
-  final String description;
-  final int price;
-  final IconData icon;
-
   const ShopItem({
     required this.id,
     required this.title,
     required this.description,
     required this.price,
-    required this.icon,
   });
+
+  final String id;
+  final String title;
+  final String description;
+  final int price;
 }
 
 class GameLog {
-  final String message;
+  const GameLog({
+    required this.timestamp,
+    required this.message,
+  });
+
   final DateTime timestamp;
+  final String message;
 
-  const GameLog({required this.message, required this.timestamp});
+  Map<String, dynamic> toMap() {
+    return {
+      'timestamp': timestamp.toIso8601String(),
+      'message': message,
+    };
+  }
 
-  Map<String, dynamic> toJson() => {
-        'message': message,
-        'timestamp': timestamp.toIso8601String(),
-      };
+  factory GameLog.fromMap(Map<String, dynamic> map) {
+    return GameLog(
+      timestamp: DateTime.parse(map['timestamp'] as String),
+      message: map['message'] as String,
+    );
+  }
+}
 
-  factory GameLog.fromJson(Map<String, dynamic> json) => GameLog(
-        message: json['message'] as String,
-        timestamp: DateTime.parse(json['timestamp'] as String),
-      );
+class HabitCompleteResult {
+  const HabitCompleteResult({
+    required this.wasCompleted,
+    required this.xpGained,
+    required this.restMinutesGained,
+    required this.levelsGained,
+    required this.newLevel,
+    required this.currentStreak,
+  });
+
+  final bool wasCompleted;
+  final int xpGained;
+  final int restMinutesGained;
+  final int levelsGained;
+  final int newLevel;
+  final int currentStreak;
+}
+
+class RewardClaimResult {
+  const RewardClaimResult({
+    required this.success,
+    required this.xpGained,
+    required this.restMinutesGained,
+    required this.levelsGained,
+    required this.newLevel,
+  });
+
+  final bool success;
+  final int xpGained;
+  final int restMinutesGained;
+  final int levelsGained;
+  final int newLevel;
 }
 
 class StatsController extends ChangeNotifier {
+  StatsController();
+
+  static const int maxXp = 100;
+  static const int maxLogs = 100;
+
+  static const String levelKey = 'level';
+  static const String xpKey = 'xp';
+  static const String restMinutesKey = 'rest_minutes';
+  static const String legacyGoldKey = 'gold';
+  static const String streakKey = 'streak';
+  static const String lastOpenedDateKey = 'last_opened_date';
+  static const String lastRewardDateKey = 'last_rewarded_date';
+  static const String legacyLastCompletedDateKey = 'last_completed_date';
+  static const String habitsStateKey = 'habits_state';
+  static const String inventoryItemIdsKey = 'inventory_item_ids';
+  static const String gameLogsKey = 'game_logs';
+  static const String activeTimerHabitIdKey = 'active_timer_habit_id';
+  static const String timerEndAtKey = 'timer_end_at';
+
+  SharedPreferences? _prefs;
+  Timer? _timer;
+
   int _level = 1;
   int _xp = 0;
   int _restMinutes = 0;
+  int _streak = 0;
+  bool _isLoading = true;
+  DateTime? _lastOpenedDate;
+  DateTime? _lastRewardDate;
   List<Habit> _habits = [];
-  final List<String> _inventory = [];
-  final List<GameLog> _logs = [];
+  List<ShopItem> _shopItems = [];
+  List<String> _inventoryItemIds = [];
+  List<GameLog> _logs = [];
+  String? _activeTimerHabitId;
+  DateTime? _timerEndAt;
 
   int get level => _level;
   int get xp => _xp;
   int get restMinutes => _restMinutes;
-  List<Habit> get habits => _habits;
-  List<String> get inventory => _inventory;
-  List<GameLog> get logs => _logs.reversed.toList();
+  int get streak => _streak;
+  bool get isLoading => _isLoading;
+  double get progress => _xp / maxXp;
+  List<Habit> get habits => List.unmodifiable(_habits);
+  List<ShopItem> get shopItems => List.unmodifiable(_shopItems);
+  List<String> get inventoryItemIds => List.unmodifiable(_inventoryItemIds);
+  int get inventoryCount => _inventoryItemIds.length;
+  List<GameLog> get logs => List.unmodifiable(_logs);
 
-  int get xpToNextLevel => _level * 100;
-
-  final List<ShopItem> shopItems = const [
-    ShopItem(
-      id: 'series',
-      title: 'Серия сериала',
-      description: 'Позволяет посмотреть одну серию любимого шоу без чувства вины.',
-      price: 30,
-      icon: Icons.tv,
-    ),
-    ShopItem(
-      id: 'snack',
-      title: 'Вкусняшка',
-      description: 'Читмил! Купи себе что-то сладкое или вредное.',
-      price: 45,
-      icon: Icons.cookie,
-    ),
-    ShopItem(
-      id: 'gaming',
-      title: 'Час видеоигр',
-      description: 'Один час чистой игровой сессии на ПК или консоли.',
-      price: 60,
-      icon: Icons.sports_esports,
-    ),
-  ];
-
-  StatsController() {
-    _initDefaultHabits();
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
-  void _initDefaultHabits() {
-    _habits = const [
-      Habit(id: '1', title: 'Выпить стакан воды', xpReward: 10, restMinutesReward: 5),
-      Habit(id: '2', title: 'Сделать зарядку', xpReward: 25, restMinutesReward: 15),
-      Habit(id: '3', title: 'Почитать книгу 20 мин', xpReward: 40, restMinutesReward: 25),
+  List<Habit> _createDefaultHabits() {
+    return const [
+      Habit(
+        id: 'water',
+        title: 'Выпить стакан воды',
+        xpReward: 10,
+        restMinutesReward: 5,
+        iconType: HabitIconType.water,
+        proofType: ProofType.note,
+      ),
+      Habit(
+        id: 'sport',
+        title: 'Сделать 10 минут зарядки',
+        xpReward: 30,
+        restMinutesReward: 15,
+        iconType: HabitIconType.sport,
+        proofType: ProofType.timer,
+        targetSeconds: 600,
+      ),
+      Habit(
+        id: 'book',
+        title: 'Почитать 15 минут',
+        xpReward: 25,
+        restMinutesReward: 10,
+        iconType: HabitIconType.book,
+        proofType: ProofType.timer,
+        targetSeconds: 900,
+      ),
     ];
   }
 
-  void toggleHabit(String id) {
-    final index = _habits.indexWhere((h) => h.id == id);
-    if (index == -index - 1) return;
+  List<ShopItem> _createDefaultShopItems() {
+    return const [
+      ShopItem(
+        id: 'series',
+        title: 'Серия сериала',
+        description: 'Один эпизод любимого сериала без чувства вины.',
+        price: 30,
+      ),
+      ShopItem(
+        id: 'snack',
+        title: 'Вкусняшка',
+        description: 'Маленькая награда: десерт, кофе или любимый снек.',
+        price: 40,
+      ),
+      ShopItem(
+        id: 'games',
+        title: '1 час видеоигр',
+        description: 'Честно заработанный игровой час для отдыха.',
+        price: 60,
+      ),
+    ];
+  }
 
-    final habit = _habits[index];
-    final newVal = !habit.isCompletedToday;
-    _habits[index] = habit.copyWith(isCompletedToday: newVal);
+  DateTime _today() {
+    final now = DateTime.now();
+    return DateTime.utc(now.year, now.month, now.day);
+  }
 
-    if (newVal) {
-      _addXp(habit.xpReward);
-      _restMinutes += habit.restMinutesReward;
-      _addLog('Выполнена привычка: "${habit.title}" (+${habit.restMinutesReward} мин. отдыха)');
-    } else {
-      _xp = (_xp - habit.xpReward).clamp(0, double.infinity).toInt();
-      _restMinutes = (_restMinutes - habit.restMinutesReward).clamp(0, double.infinity).toInt();
-      _addLog('Отменено выполнение: "${habit.title}"');
+  bool _isSameDay(DateTime first, DateTime second) {
+    return first.year == second.year &&
+        first.month == second.month &&
+        first.day == second.day;
+  }
+
+  String _formatDate(DateTime date) {
+    final year = date.year.toString().padLeft(4, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+
+  DateTime? _parseDate(String? value) {
+    if (value == null || value.isEmpty) return null;
+
+    final parts = value.split('-');
+    if (parts.length != 3) return null;
+
+    final year = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final day = int.tryParse(parts[2]);
+
+    if (year == null || month == null || day == null) return null;
+
+    return DateTime.utc(year, month, day);
+  }
+
+  Future<SharedPreferences> _getPrefs() async {
+    return _prefs ??= await SharedPreferences.getInstance();
+  }
+
+  ShopItem? getShopItemById(String itemId) {
+    try {
+      return _shopItems.firstWhere((item) => item.id == itemId);
+    } catch (_) {
+      return null;
     }
-
-    _saveProgress();
-    notifyListeners();
   }
 
-  void _addXp(int amount) {
-    _xp += amount;
-    while (_xp >= xpToNextLevel) {
-      _xp -= xpToNextLevel;
-      _level++;
-      _addLog('🎉 УРОВЕНЬ ПОВЫШЕН! Вы достигли $_level уровня!');
-    }
+  int getPurchaseCountFor(String itemId) {
+    return _inventoryItemIds.where((id) => id == itemId).length;
   }
 
-  Future<bool> buyItem(String id) async {
-    final item = shopItems.firstWhere((i) => i.id == id);
-    if (_restMinutes < item.price) return false;
-
-    _restMinutes -= item.price;
-    _inventory.add(item.id);
-    _addLog('🛒 Куплено в магазине: ${item.title} (-${item.price} мин.)');
-    
-    await _saveProgress();
-    notifyListeners();
-    return true;
-  }
-
-  void useItem(String itemId) {
-    if (_inventory.contains(itemId)) {
-      _inventory.remove(itemId);
-      final item = shopItems.firstWhere((i) => i.id == itemId);
-      _addLog('🚀 Использовано: ${item.title}. Время отдыха пошло!');
-      _saveProgress();
-      notifyListeners();
-    }
-  }
-
-  void resetProgress() {
-    _level = 1;
-    _xp = 0;
-    _restMinutes = 0;
-    _inventory.clear();
-    _initDefaultHabits();
-    _logs.clear();
-    _addLog('🔄 Прогресс полностью сброшен.');
-    _saveProgress();
-    notifyListeners();
-  }
-
-  void _addLog(String msg) {
-    _logs.add(GameLog(message: msg, timestamp: DateTime.now()));
-  }
-
-  Future<void> _saveProgress() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('level', _level);
-    await prefs.setInt('xp', _xp);
-    await prefs.setInt('restMinutes', _restMinutes);
-    await prefs.setStringList('inventory', _inventory);
-
-    final habitsJson = _habits.map((h) => h.toJson()).toList();
-    await prefs.setString('habits', jsonEncode(habitsJson));
-
-    final logsJson = _logs.map((l) => l.toJson()).toList();
-    await prefs.setString('logs', jsonEncode(logsJson));
+  int remainingSecondsForHabit(String habitId) {
+    if (_activeTimerHabitId != habitId || _timerEndAt == null) return 0;
+    return math.max(0, _timerEndAt!.difference(DateTime.now()).inSeconds);
   }
 
   Future<void> loadProgress() async {
-    final prefs = await SharedPreferences.getInstance();
-    _level = prefs.getInt('level') ?? 1;
-    _xp = prefs.getInt('xp') ?? 0;
-    _restMinutes = prefs.getInt('restMinutes') ?? 0;
-    
-    final savedInv = prefs.getStringList('inventory');
-    if (savedInv != null) {
-      _inventory.clear();
-      _inventory.addAll(savedInv);
+    _isLoading = true;
+    notifyListeners();
+
+    final prefs = await _getPrefs();
+    final today = _today();
+
+    _shopItems = _createDefaultShopItems();
+    _level = prefs.getInt(levelKey) ?? 1;
+    _xp = prefs.getInt(xpKey) ?? 0;
+    _restMinutes =
+        prefs.getInt(restMinutesKey) ?? prefs.getInt(legacyGoldKey) ?? 0;
+    _streak = prefs.getInt(streakKey) ?? 0;
+    _logs = _decodeLogs(prefs.getStringList(gameLogsKey) ?? []);
+    _inventoryItemIds = (prefs.getStringList(inventoryItemIdsKey) ?? [])
+        .where((id) => getShopItemById(id) != null)
+        .toList(growable: false);
+    _lastOpenedDate = _parseDate(prefs.getString(lastOpenedDateKey));
+    _lastRewardDate = _parseDate(prefs.getString(lastRewardDateKey)) ??
+        _parseDate(prefs.getString(legacyLastCompletedDateKey));
+
+    final isNewDay =
+        _lastOpenedDate == null || !_isSameDay(_lastOpenedDate!, today);
+
+    if (_lastRewardDate == null) {
+      _streak = 0;
+    } else if (today.difference(_lastRewardDate!).inDays > 1) {
+      _streak = 0;
     }
 
-    final habitsStr = prefs.getString('habits');
-    if (habitsStr != null) {
+    if (isNewDay) {
+      _habits = _createDefaultHabits();
+      _activeTimerHabitId = null;
+      _timerEndAt = null;
+      _timer?.cancel();
+    } else {
+      _habits = _loadHabitsFromPrefs(prefs);
+      _activeTimerHabitId = prefs.getString(activeTimerHabitIdKey);
+      final timerEndRaw = prefs.getString(timerEndAtKey);
+      _timerEndAt = timerEndRaw == null ? null : DateTime.tryParse(timerEndRaw);
+      _restoreTimerState();
+    }
+
+    _lastOpenedDate = today;
+    await _saveAll();
+
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  List<Habit> _loadHabitsFromPrefs(SharedPreferences prefs) {
+    final defaults = _createDefaultHabits();
+    final raw = prefs.getStringList(habitsStateKey) ?? [];
+    if (raw.isEmpty) return defaults;
+
+    final loadedById = <String, Habit>{};
+    for (final item in raw) {
       try {
-        final List<dynamic> decoded = jsonDecode(habitsStr);
-        _habits = decoded.map((item) => Habit.fromJson(item as Map<String, dynamic>)).toList();
+        final map = jsonDecode(item) as Map<String, dynamic>;
+        final habit = Habit.fromMap(map);
+        loadedById[habit.id] = habit;
       } catch (_) {
-        _initDefaultHabits();
+        // ignore broken entries
       }
     }
 
-    final logsStr = prefs.getString('logs');
-    if (logsStr != null) {
+    return defaults.map((defaultHabit) {
+      final loaded = loadedById[defaultHabit.id];
+      if (loaded == null) return defaultHabit;
+      return defaultHabit.copyWith(
+        status: loaded.status,
+        isCompletedToday: loaded.isCompletedToday,
+        proofNote: loaded.proofNote,
+        proofSubmittedAt: loaded.proofSubmittedAt,
+      );
+    }).toList(growable: false);
+  }
+
+  List<GameLog> _decodeLogs(List<String> rawLogs) {
+    final result = <GameLog>[];
+
+    for (final raw in rawLogs) {
       try {
-        final List<dynamic> decoded = jsonDecode(logsStr);
-        _logs.clear();
-        _logs.addAll(decoded.map((item) => GameLog.fromJson(item as Map<String, dynamic>)));
-      } catch (_) {}
+        final map = jsonDecode(raw) as Map<String, dynamic>;
+        result.add(GameLog.fromMap(map));
+      } catch (_) {
+        // ignore broken entries
+      }
     }
+
+    return result;
+  }
+
+  void _restoreTimerState() {
+    _timer?.cancel();
+
+    if (_activeTimerHabitId == null || _timerEndAt == null) return;
+
+    final habitIndex = _habits.indexWhere((habit) => habit.id == _activeTimerHabitId);
+    if (habitIndex == -1) {
+      _clearTimerState();
+      return;
+    }
+
+    final habit = _habits[habitIndex];
+    if (habit.status != HabitStatus.inProgress) {
+      _clearTimerState();
+      return;
+    }
+
+    if (_timerEndAt!.isBefore(DateTime.now())) {
+      _habits[habitIndex] = habit.copyWith(
+        status: HabitStatus.rewardReady,
+        proofSubmittedAt: DateTime.now(),
+      );
+      _clearTimerState();
+      return;
+    }
+
+    _startTimerTicker();
+  }
+
+  void _startTimerTicker() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_activeTimerHabitId == null || _timerEndAt == null) {
+        timer.cancel();
+        return;
+      }
+
+      final remaining = _timerEndAt!.difference(DateTime.now()).inSeconds;
+      if (remaining <= 0) {
+        timer.cancel();
+        _finishActiveTimer();
+        return;
+      }
+
+      notifyListeners();
+    });
+  }
+
+  Future<void> _finishActiveTimer() async {
+    if (_activeTimerHabitId == null) return;
+
+    final index = _habits.indexWhere((habit) => habit.id == _activeTimerHabitId);
+    if (index == -1) {
+      _clearTimerState();
+      await _saveAll();
+      return;
+    }
+
+    final habit = _habits[index];
+    _habits[index] = habit.copyWith(
+      status: HabitStatus.rewardReady,
+      proofSubmittedAt: DateTime.now(),
+    );
+
+    _clearTimerState();
     notifyListeners();
+    await _saveAll();
+  }
+
+  void _clearTimerState() {
+    _timer?.cancel();
+    _timer = null;
+    _activeTimerHabitId = null;
+    _timerEndAt = null;
+  }
+
+  Future<bool> startTimerProof(String habitId) async {
+    final index = _habits.indexWhere((habit) => habit.id == habitId);
+    if (index == -1) return false;
+
+    final habit = _habits[index];
+    if (habit.isCompletedToday || habit.status != HabitStatus.idle) return false;
+    if (habit.proofType != ProofType.timer || habit.targetSeconds <= 0) {
+      return false;
+    }
+
+    if (_activeTimerHabitId != null) return false;
+
+    _habits[index] = habit.copyWith(status: HabitStatus.inProgress);
+    _activeTimerHabitId = habitId;
+    _timerEndAt = DateTime.now().add(Duration(seconds: habit.targetSeconds));
+    _startTimerTicker();
+
+    notifyListeners();
+    await _saveAll();
+    return true;
+  }
+
+  Future<bool> submitNoteProof(String habitId, String note) async {
+    final trimmed = note.trim();
+    if (trimmed.isEmpty) return false;
+
+    final index = _habits.indexWhere((habit) => habit.id == habitId);
+    if (index == -1) return false;
+
+    final habit = _habits[index];
+    if (habit.isCompletedToday || habit.status != HabitStatus.idle) return false;
+    if (habit.proofType != ProofType.note) return false;
+
+    _habits[index] = habit.copyWith(
+      status: HabitStatus.rewardReady,
+      proofNote: trimmed,
+      proofSubmittedAt: DateTime.now(),
+    );
+
+    notifyListeners();
+    await _saveAll();
+    return true;
+  }
+
+  void _updateStreakForToday(DateTime today) {
+    if (_lastRewardDate == null) {
+      _streak = 1;
+      _lastRewardDate = today;
+      return;
+    }
+
+    final difference = today.difference(_lastRewardDate!).inDays;
+    if (difference == 0) return;
+    if (difference == 1) {
+      _streak += 1;
+    } else {
+      _streak = 1;
+    }
+    _lastRewardDate = today;
+  }
+
+  Future<RewardClaimResult> claimReward(String habitId) async {
+    final index = _habits.indexWhere((habit) => habit.id == habitId);
+    if (index == -1) {
+      return RewardClaimResult(
+        success: false,
+        xpGained: 0,
+        restMinutesGained: 0,
+        levelsGained: 0,
+        newLevel: _level,
+      );
+    }
+
+    final habit = _habits[index];
+    if (habit.status != HabitStatus.rewardReady) {
+      return RewardClaimResult(
+        success: false,
+        xpGained: 0,
+        restMinutesGained: 0,
+        levelsGained: 0,
+        newLevel: _level,
+      );
+    }
+
+    final today = _today();
+    _updateStreakForToday(today);
+
+    _xp += habit.xpReward;
+    _restMinutes += habit.restMinutesReward;
+
+    int levelsGained = 0;
+    while (_xp >= maxXp) {
+      _xp -= maxXp;
+      _level++;
+      levelsGained++;
+    }
+
+    _habits[index] = habit.copyWith(
+      status: HabitStatus.completed,
+      isCompletedToday: true,
+    );
+
+    _addLog(
+      'Выполнено: ${habit.title}. Получено +${habit.restMinutesReward} мин. отдыха',
+    );
+
+    notifyListeners();
+    await _saveAll();
+
+    return RewardClaimResult(
+      success: true,
+      xpGained: habit.xpReward,
+      restMinutesGained: habit.restMinutesReward,
+      levelsGained: levelsGained,
+      newLevel: _level,
+    );
+  }
+
+  Future<bool> buyItem(String itemId) async {
+    final item = getShopItemById(itemId);
+    if (item == null || _restMinutes < item.price) return false;
+
+    _restMinutes -= item.price;
+    _inventoryItemIds = [..._inventoryItemIds, item.id];
+    _addLog('Куплено: ${item.title}. Списано -${item.price} мин.');
+
+    notifyListeners();
+    await _saveAll();
+    return true;
+  }
+
+  Future<bool> useItem(String itemId) async {
+    final itemIndex = _inventoryItemIds.indexOf(itemId);
+    if (itemIndex == -1) return false;
+
+    final item = getShopItemById(itemId);
+    if (item == null) return false;
+
+    final updatedInventory = List<String>.from(_inventoryItemIds)
+      ..removeAt(itemIndex);
+    _inventoryItemIds = updatedInventory;
+    _addLog('Активировано: ${item.title}');
+
+    notifyListeners();
+    await _saveInventory();
+    await _saveLogs();
+    return true;
+  }
+
+  Future<void> resetProgress() async {
+    _level = 1;
+    _xp = 0;
+    _restMinutes = 0;
+    _streak = 0;
+    _shopItems = _createDefaultShopItems();
+    _habits = _createDefaultHabits();
+    _inventoryItemIds = [];
+    _logs = [];
+    _lastOpenedDate = _today();
+    _lastRewardDate = null;
+    _clearTimerState();
+
+    notifyListeners();
+    await _saveAll();
+  }
+
+  Future<void> _saveStatsAndMeta() async {
+    final prefs = await _getPrefs();
+
+    await prefs.setInt(levelKey, _level);
+    await prefs.setInt(xpKey, _xp);
+    await prefs.setInt(restMinutesKey, _restMinutes);
+    await prefs.remove(legacyGoldKey);
+    await prefs.setInt(streakKey, _streak);
+
+    if (_lastOpenedDate != null) {
+      await prefs.setString(lastOpenedDateKey, _formatDate(_lastOpenedDate!));
+    }
+
+    if (_lastRewardDate != null) {
+      await prefs.setString(lastRewardDateKey, _formatDate(_lastRewardDate!));
+    } else {
+      await prefs.remove(lastRewardDateKey);
+      await prefs.remove(legacyLastCompletedDateKey);
+    }
+
+    if (_activeTimerHabitId != null && _timerEndAt != null) {
+      await prefs.setString(activeTimerHabitIdKey, _activeTimerHabitId!);
+      await prefs.setString(timerEndAtKey, _timerEndAt!.toIso8601String());
+    } else {
+      await prefs.remove(activeTimerHabitIdKey);
+      await prefs.remove(timerEndAtKey);
+    }
+  }
+
+  Future<void> _saveHabits() async {
+    final prefs = await _getPrefs();
+    final encoded = _habits
+        .map((habit) => jsonEncode(habit.toMap()))
+        .toList(growable: false);
+    await prefs.setStringList(habitsStateKey, encoded);
+  }
+
+  Future<void> _saveInventory() async {
+    final prefs = await _getPrefs();
+    await prefs.setStringList(inventoryItemIdsKey, _inventoryItemIds);
+  }
+
+  Future<void> _saveLogs() async {
+    final prefs = await _getPrefs();
+    final encoded = _logs
+        .map((log) => jsonEncode(log.toMap()))
+        .toList(growable: false);
+    await prefs.setStringList(gameLogsKey, encoded);
+  }
+
+  Future<void> _saveAll() async {
+    await _saveStatsAndMeta();
+    await _saveHabits();
+    await _saveInventory();
+    await _saveLogs();
   }
 }
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
+
   @override
   State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
-  int _currentIndex = 0;
-  final PageController _pageController = PageController();
+  late final PageController _pageController;
+  int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+  }
 
   @override
   void dispose() {
@@ -300,14 +809,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     super.dispose();
   }
 
-  void _onPageChanged(int index) {
+  Future<void> _onTabSelected(int index) async {
     setState(() {
-      _currentIndex = index;
+      _selectedIndex = index;
     });
-  }
 
-  void _onTap(int index) {
-    _pageController.animateToPage(
+    await _pageController.animateToPage(
       index,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
@@ -319,7 +826,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     return Scaffold(
       body: PageView(
         controller: _pageController,
-        onPageChanged: _onPageChanged,
+        onPageChanged: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
         children: const [
           HomeScreen(),
           ShopScreen(),
@@ -327,14 +838,24 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: _onTap,
-        selectedItemColor: const Color(0xFF5B8CFF),
-        unselectedItemColor: Colors.grey,
+        currentIndex: _selectedIndex,
+        onTap: _onTabSelected,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Герой'),
-          BottomNavigationBarItem(icon: Icon(Icons.shopping_bag), label: 'Магазин'),
-          BottomNavigationBarItem(icon: Icon(Icons.backpack), label: 'Инвентарь'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline_rounded),
+            activeIcon: Icon(Icons.person_rounded),
+            label: 'Персонаж',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.shopping_bag_outlined),
+            activeIcon: Icon(Icons.shopping_bag_rounded),
+            label: 'Магазин',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.inventory_2_outlined),
+            activeIcon: Icon(Icons.inventory_2_rounded),
+            label: 'Инвентарь',
+          ),
         ],
       ),
     );
@@ -344,124 +865,252 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
+  Future<void> _showNoteProofDialog(BuildContext context, Habit habit) async {
+    final controller = context.read<StatsController>();
+    final noteController = TextEditingController();
+
+    final bool? submitted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(habit.title),
+          content: TextField(
+            controller: noteController,
+            autofocus: true,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              hintText: 'Коротко напиши, как выполнил привычку',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Подтвердить'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (submitted != true) {
+      noteController.dispose();
+      return;
+    }
+
+    final success = await controller.submitNoteProof(habit.id, noteController.text);
+    noteController.dispose();
+
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? 'Подтверждение принято. Награда готова.'
+                : 'Не удалось подтвердить привычку.',
+          ),
+        ),
+      );
+  }
+
+  Future<void> _handleHabitAction(BuildContext context, Habit habit) async {
+    final controller = context.read<StatsController>();
+
+    switch (habit.status) {
+      case HabitStatus.idle:
+        if (habit.proofType == ProofType.note) {
+          await _showNoteProofDialog(context, habit);
+        } else {
+          final started = await controller.startTimerProof(habit.id);
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              SnackBar(
+                content: Text(
+                  started
+                      ? 'Таймер запущен: ${habit.title}'
+                      : 'Сейчас нельзя запустить эту привычку.',
+                ),
+              ),
+            );
+        }
+      case HabitStatus.inProgress:
+        break;
+      case HabitStatus.rewardReady:
+        final result = await controller.claimReward(habit.id);
+        if (!context.mounted || !result.success) return;
+
+        if (result.levelsGained > 0) {
+          await _showLevelUpDialog(context, result.newLevel);
+        }
+
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Награда получена: +${result.xpGained} XP и +${result.restMinutesGained} мин. отдыха',
+              ),
+            ),
+          );
+      case HabitStatus.completed:
+        break;
+    }
+  }
+
+  Future<void> _confirmResetProgress(BuildContext context) async {
+    final controller = context.read<StatsController>();
+
+    final bool? shouldReset = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Сбросить прогресс?'),
+          content: const Text(
+            'Уровень, опыт, минуты отдыха, серия, инвентарь, история и прогресс привычек будут сброшены.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Сбросить'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldReset != true) return;
+
+    await controller.resetProgress();
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('Прогресс сброшен.')),
+      );
+  }
+
+  Future<void> _showLevelUpDialog(BuildContext context, int newLevel) {
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('LEVEL UP!'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Text(
+                'Level $newLevel',
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('Ты поднялся на новый уровень.'),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('В бой!'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<StatsController>();
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Мой Герой', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Персонаж'),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.redAccent),
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text('Сбросить прогресс?'),
-                  content: const Text('Это удалит ваш уровень, минуты отдыха и инвентарь.'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
-                    TextButton(
-                      onPressed: () {
-                        context.read<StatsController>().resetProgress();
-                        Navigator.pop(context);
-                      },
-                      child: const Text('Сбросить', style: TextStyle(color: Colors.redAccent)),
+            tooltip: 'Сбросить прогресс',
+            onPressed: controller.isLoading
+                ? null
+                : () => _confirmResetProgress(context),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+      body: controller.isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    StatsCard(
+                      level: controller.level,
+                      xp: controller.xp,
+                      maxXp: StatsController.maxXp,
+                      progress: controller.progress,
+                      streak: controller.streak,
+                      restMinutes: controller.restMinutes,
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Привычки',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Сначала подтверди выполнение, потом отдельно забери награду.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF6B7280),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: controller.habits.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          final habit = controller.habits[index];
+                          return HabitCard(
+                            habit: habit,
+                            remainingSeconds:
+                                controller.remainingSecondsForHabit(habit.id),
+                            onTap: habit.status == HabitStatus.inProgress ||
+                                    habit.status == HabitStatus.completed
+                                ? null
+                                : () => _handleHabitAction(context, habit),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),
-              );
-            },
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _buildProfileCard(controller),
-          const SizedBox(height: 24),
-          const Text('Ежедневные Привычки', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          ...controller.habits.map((habit) => _buildHabitCard(context, controller, habit)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileCard(StatsController controller) {
-    final progress = controller.xp / controller.xpToNextLevel;
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 60,
-                height: 60,
-                decoration: const BoxDecoration(color: Color(0xFFE8EFFF), shape: BoxShape.circle),
-                child: const Icon(Icons.shield, color: Color(0xFF5B8CFF), size: 32),
               ),
-              const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Уровень ${controller.level}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  Text('${controller.xp} / ${controller.xpToNextLevel} XP', style: TextStyle(color: Colors.grey[600])),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(value: progress, minHeight: 8, backgroundColor: Colors.grey[200], valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF5B8CFF))),
-          ),
-          const Divider(height: 32),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildStatItem(Icons.hourglass_top, '${controller.restMinutes} мин', 'Отдых'),
-              _buildStatItem(Icons.done_all, '${controller.habits.where((h) => h.isCompletedToday).length}', 'Сделано'),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatItem(IconData icon, String value, String label) {
-    return Column(
-      children: [
-        Icon(icon, color: const Color(0xFF5B8CFF)),
-        const SizedBox(height: 4),
-        Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-      ],
-    );
-  }
-
-  Widget _buildHabitCard(BuildContext context, StatsController controller, Habit habit) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      elevation: 0,
-      color: habit.isCompletedToday ? const Color(0xFFE8EFFF) : Colors.white,
-      child: ListTile(
-        leading: Icon(
-          habit.isCompletedToday ? Icons.check_circle : Icons.radio_button_unchecked,
-          color: const Color(0xFF5B8CFF),
-        ),
-        title: Text(habit.title, style: TextStyle(decoration: habit.isCompletedToday ? TextDecoration.lineThrough : null, fontWeight: FontWeight.w600)),
-        subtitle: Text('+${habit.xpReward} XP  |  +${habit.restMinutesReward} мин'),
-        onTap: () => controller.toggleHabit(habit.id),
-      ),
+            ),
     );
   }
 }
@@ -469,52 +1118,99 @@ class HomeScreen extends StatelessWidget {
 class ShopScreen extends StatelessWidget {
   const ShopScreen({super.key});
 
+  Future<void> _buyItem(BuildContext context, ShopItem item) async {
+    final controller = context.read<StatsController>();
+    final success = await controller.buyItem(item.id);
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? 'Куплено: ${item.title} (-${item.price} мин.)'
+                : 'Недостаточно минут отдыха.',
+          ),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<StatsController>();
+
+    if (controller.isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Магазин Наград', style: TextStyle(fontWeight: FontWeight.bold))),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: const Color(0xFFFFFAEB), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFFFEAA7))),
-            child: Row(
-              children: [
-                const Icon(Icons.hourglass_bottom, color: Color(0xFFE67E22)),
-                const SizedBox(width: 12),
-                Text('Доступно для трат: ${controller.restMinutes} минут', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFFD35400))),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          ...controller.shopItems.map((item) => Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: ListTile(
-                    leading: CircleAvatar(backgroundColor: const Color(0xFFFFFAEB), child: Icon(item.icon, color: const Color(0xFFE67E22))),
-                    title: Text(item.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('${item.description}\nЦена: ${item.price} мин.'),
-                    isThreeLine: true,
-                    trailing: ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF5B8CFF), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                      onPressed: controller.restMinutes >= item.price
-                          ? () async {
-                              final success = await controller.buyItem(item.id);
-                              if (success && context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Куплено: ${item.title}')));
-                              }
-                            }
-                          : null,
-                      child: const Text('Купить'),
-                    ),
+      appBar: AppBar(
+        title: const Text('Магазин наград'),
+        centerTitle: true,
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SummaryCard(
+                title: 'Минуты отдыха',
+                subtitle: 'Трать только то, что реально заработал.',
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _MiniMetric(
+                    icon: Icons.schedule_rounded,
+                    label: '${controller.restMinutes} мин.',
                   ),
+                  const SizedBox(width: 10),
+                  _MiniMetric(
+                    icon: Icons.inventory_2_rounded,
+                    label: '${controller.inventoryCount} предметов',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Награды',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF111827),
                 ),
-              )),
-        ],
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: GridView.builder(
+                  itemCount: controller.shopItems.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 0.82,
+                  ),
+                  itemBuilder: (context, index) {
+                    final item = controller.shopItems[index];
+                    final canBuy = controller.restMinutes >= item.price;
+                    final purchaseCount = controller.getPurchaseCountFor(item.id);
+
+                    return _ShopItemCard(
+                      item: item,
+                      purchaseCount: purchaseCount,
+                      canBuy: canBuy,
+                      onBuy: () => _buyItem(context, item),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -523,89 +1219,842 @@ class ShopScreen extends StatelessWidget {
 class InventoryScreen extends StatelessWidget {
   const InventoryScreen({super.key});
 
+  Future<void> _useItem(BuildContext context, ShopItem item) async {
+    final controller = context.read<StatsController>();
+    final success = await controller.useItem(item.id);
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? 'Вы активировали награду: ${item.title}'
+                : 'Этот предмет уже закончился.',
+          ),
+        ),
+      );
+  }
+
+  String _formatLogTime(DateTime dateTime) {
+    final day = dateTime.day.toString().padLeft(2, '0');
+    final month = dateTime.month.toString().padLeft(2, '0');
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$day.$month • $hour:$minute';
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<StatsController>();
-    
-    final Map<String, int> counts = {};
-    for (var id in controller.inventory) {
-      counts[id] = (counts[id] ?? 0) + 1;
+
+    if (controller.isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
-    final uniqueIds = counts.keys.toList();
+
+    final ownedItems = controller.shopItems
+        .where((item) => controller.getPurchaseCountFor(item.id) > 0)
+        .toList(growable: false);
+
+    final itemsHeight = ownedItems.isEmpty
+        ? 0.0
+        : ownedItems.length == 1
+            ? 144.0
+            : ownedItems.length == 2
+                ? 252.0
+                : 320.0;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Инвентарь и Логи', style: TextStyle(fontWeight: FontWeight.bold))),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Ваши Награды', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            if (uniqueIds.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('Инвентарь пуст. Купите что-нибудь в магазине!')))
-            else
-              SizedBox(
-                height: 110,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: uniqueIds.length,
-                  itemBuilder: (context, index) {
-                    final id = uniqueIds[index];
-                    final count = counts[id]!;
-                    final item = controller.shopItems.firstWhere((i) => i.id == id);
-                    return Card(
-                      margin: const EdgeInsets.only(right: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      child: Container(
-                        width: 130,
-                        padding: const EdgeInsets.all(8),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Badge(
-                              label: Text('$count'),
-                              child: Icon(item.icon, color: const Color(0xFF5B8CFF), size: 28),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(item.title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-                            const SizedBox(height: 4),
-                            SizedBox(
-                              height: 26,
-                              child: TextButton(
-                                style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                                onPressed: () => controller.useItem(id),
-                                child: const Text('Юзнуть', style: TextStyle(fontSize: 11)),
-                              ),
-                            )
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+      appBar: AppBar(
+        title: const Text('Инвентарь'),
+        centerTitle: true,
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SummaryCard(
+                title: 'Инвентарь и история',
+                subtitle: 'Купленные награды и хронология действий.',
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _MiniMetric(
+                    icon: Icons.inventory_2_rounded,
+                    label: '${controller.inventoryCount} предметов',
+                  ),
+                  const SizedBox(width: 10),
+                  _MiniMetric(
+                    icon: Icons.schedule_rounded,
+                    label: '${controller.restMinutes} мин.',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Купленные награды',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF111827),
                 ),
               ),
-            const SizedBox(height: 24),
-            const Text('История событий', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            Expanded(
-              child: controller.logs.isEmpty
-                  ? const Center(child: Text('История пуста.'))
-                  : ListView.builder(
-                      itemCount: controller.logs.length,
-                      itemBuilder: (context, index) {
-                        final log = controller.logs[index];
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.history_toggle_off, size: 20, color: Colors.grey),
-                          title: Text(log.message, style: const TextStyle(fontSize: 13)),
-                          subtitle: Text('${log.timestamp.hour.toString().padLeft(2, '0')}:${log.timestamp.minute.toString().padLeft(2, '0')}', style: const TextStyle(fontSize: 11)),
-                        );
-                      },
+              const SizedBox(height: 12),
+              if (ownedItems.isEmpty)
+                const _EmptyCard(
+                  icon: Icons.backpack_outlined,
+                  title: 'Инвентарь пуст',
+                  subtitle: 'Купи награду в магазине, и она появится здесь.',
+                )
+              else
+                SizedBox(
+                  height: itemsHeight,
+                  child: ListView.separated(
+                    itemCount: ownedItems.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final item = ownedItems[index];
+                      return _InventoryItemTile(
+                        item: item,
+                        count: controller.getPurchaseCountFor(item.id),
+                        onUse: () => _useItem(context, item),
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 20),
+              const Text(
+                'История',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: controller.logs.isEmpty
+                    ? const _EmptyCard(
+                        icon: Icons.history_rounded,
+                        title: 'История пуста',
+                        subtitle: 'Выполняй привычки и используй награды — здесь появятся записи.',
+                      )
+                    : ListView.builder(
+                        itemCount: controller.logs.length,
+                        itemBuilder: (context, index) {
+                          final log = controller.logs[index];
+                          return _LogTile(
+                            message: log.message,
+                            timestamp: _formatLogTime(log.timestamp),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class StatsCard extends StatelessWidget {
+  const StatsCard({
+    super.key,
+    required this.level,
+    required this.xp,
+    required this.maxXp,
+    required this.progress,
+    required this.streak,
+    required this.restMinutes,
+  });
+
+  final int level;
+  final int xp;
+  final int maxXp;
+  final double progress;
+  final int streak;
+  final int restMinutes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE6EAF0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Персонаж',
+            style: TextStyle(
+              fontSize: 13,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Level $level',
+            style: const TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: _MetricBlock(
+                  label: 'Серия',
+                  value: '🔥 $streak',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _MetricBlock(
+                  label: 'Отдых',
+                  value: '⏱ $restMinutes',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Опыт',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+              Text(
+                '$xp / $maxXp XP',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF111827),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 10,
+              backgroundColor: const Color(0xFFE9EEF5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class HabitCard extends StatelessWidget {
+  const HabitCard({
+    super.key,
+    required this.habit,
+    required this.remainingSeconds,
+    required this.onTap,
+  });
+
+  final Habit habit;
+  final int remainingSeconds;
+  final VoidCallback? onTap;
+
+  IconData _iconForHabit(HabitIconType iconType) {
+    switch (iconType) {
+      case HabitIconType.water:
+        return Icons.water_drop_rounded;
+      case HabitIconType.sport:
+        return Icons.fitness_center_rounded;
+      case HabitIconType.book:
+        return Icons.menu_book_rounded;
+    }
+  }
+
+  String _formatDuration(int totalSeconds) {
+    final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  String _statusText() {
+    switch (habit.status) {
+      case HabitStatus.idle:
+        return habit.proofType == ProofType.note
+            ? 'Подтверждение заметкой'
+            : 'Таймер ${habit.targetSeconds ~/ 60} мин';
+      case HabitStatus.inProgress:
+        return 'Идёт таймер ${_formatDuration(remainingSeconds)}';
+      case HabitStatus.rewardReady:
+        return 'Доказательство принято';
+      case HabitStatus.completed:
+        return 'Выполнено сегодня';
+    }
+  }
+
+  String _actionLabel() {
+    switch (habit.status) {
+      case HabitStatus.idle:
+        return habit.proofType == ProofType.note ? 'Подтвердить' : 'Начать';
+      case HabitStatus.inProgress:
+        return _formatDuration(remainingSeconds);
+      case HabitStatus.rewardReady:
+        return 'Забрать';
+      case HabitStatus.completed:
+        return 'Готово';
+    }
+  }
+
+  bool _isPrimaryAction() {
+    return habit.status == HabitStatus.idle || habit.status == HabitStatus.rewardReady;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = habit.status == HabitStatus.completed;
+    final muted = completed || habit.status == HabitStatus.inProgress;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE6EAF0)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: completed
+                  ? const Color(0xFFE9F8EF)
+                  : const Color(0xFFF2F5FA),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(
+              _iconForHabit(habit.iconType),
+              color: completed
+                  ? const Color(0xFF1D9E62)
+                  : const Color(0xFF4F46E5),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  habit.title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _statusText(),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: completed
+                        ? const Color(0xFF1D9E62)
+                        : const Color(0xFF6B7280),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _SoftBadge(label: '+${habit.xpReward} XP'),
+                    _SoftBadge(label: '+${habit.restMinutesReward} мин'),
+                  ],
+                ),
+                if (habit.proofNote != null && habit.proofNote!.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    'Заметка: ${habit.proofNote}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF6B7280),
                     ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 100,
+            child: FilledButton(
+              onPressed: onTap,
+              style: FilledButton.styleFrom(
+                backgroundColor: _isPrimaryAction()
+                    ? const Color(0xFF111827)
+                    : const Color(0xFFE5E7EB),
+                foregroundColor: _isPrimaryAction()
+                    ? Colors.white
+                    : const Color(0xFF6B7280),
+                disabledBackgroundColor: const Color(0xFFE5E7EB),
+                disabledForegroundColor: const Color(0xFF9CA3AF),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                elevation: 0,
+              ),
+              child: Text(
+                _actionLabel(),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricBlock extends StatelessWidget {
+  const _MetricBlock({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SoftBadge extends StatelessWidget {
+  const _SoftBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF374151),
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE6EAF0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              fontSize: 14,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniMetric extends StatelessWidget {
+  const _MiniMetric({
+    required this.icon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFE6EAF0)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: const Color(0xFF4F46E5)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF111827),
+                ),
+              ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ShopItemCard extends StatelessWidget {
+  const _ShopItemCard({
+    required this.item,
+    required this.purchaseCount,
+    required this.canBuy,
+    required this.onBuy,
+  });
+
+  final ShopItem item;
+  final int purchaseCount;
+  final bool canBuy;
+  final VoidCallback onBuy;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE6EAF0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF3F4F6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.card_giftcard_rounded,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'Куплено: $purchaseCount',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            item.title,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            item.description,
+            style: const TextStyle(
+              fontSize: 13,
+              height: 1.4,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+          const Spacer(),
+          Text(
+            '${item.price} мин. отдыха',
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: canBuy ? onBuy : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF111827),
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: const Color(0xFFE5E7EB),
+                disabledForegroundColor: const Color(0xFF9CA3AF),
+              ),
+              child: Text(canBuy ? 'Купить' : 'Не хватает'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InventoryItemTile extends StatelessWidget {
+  const _InventoryItemTile({
+    required this.item,
+    required this.count,
+    required this.onUse,
+  });
+
+  final ShopItem item;
+  final int count;
+  final VoidCallback onUse;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE6EAF0)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.card_giftcard_rounded,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.description,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF6B7280),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'x$count',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const SizedBox(height: 8),
+              FilledButton(
+                onPressed: onUse,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF111827),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(96, 38),
+                ),
+                child: const Text('Использовать'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LogTile extends StatelessWidget {
+  const _LogTile({
+    required this.message,
+    required this.timestamp,
+  });
+
+  final String message;
+  final String timestamp;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE6EAF0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            message,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            timestamp,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyCard extends StatelessWidget {
+  const _EmptyCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE6EAF0)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 32, color: const Color(0xFF9CA3AF)),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 14,
+              color: Color(0xFF6B7280),
+              height: 1.45,
+            ),
+          ),
+        ],
       ),
     );
   }
